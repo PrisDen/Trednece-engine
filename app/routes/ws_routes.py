@@ -34,7 +34,7 @@ async def stream_logs(
     try:
         for log in record.logs:
             await websocket.send_json({"type": "log", "log": log.model_dump()})
-        if record.status in {"completed", "failed"}:
+        if record.status in {"completed", "failed", "cancelled"}:
             await websocket.send_json({"type": "status", "status": record.status})
 
         while True:
