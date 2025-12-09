@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-ExecutionStatus = Literal["pending", "running", "completed", "failed"]
+ExecutionStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
 """Valid lifecycle states for a workflow run."""
 
 BranchCondition = Callable[["WorkflowState"], bool]

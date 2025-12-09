@@ -34,12 +34,12 @@ async def create_graph(
         )
 
     try:
-        graph = Graph.from_dict(payload.model_dump(), registry=registry)
+        graph = Graph.from_dict(payload.model_dump(by_alias=True), registry=registry)
     except ValueError as exc:
         logger.exception("Graph validation failed: %s", exc)
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
 
-    graph_store.save(graph.id, payload.model_dump())
+    graph_store.save(graph.id, payload.model_dump(by_alias=True))
     logger.info("Registered graph %s", graph.id)
     return GraphCreateResponse(graph_id=graph.id)
 

@@ -29,9 +29,16 @@ def get_executor(request: Request):
     return request.app.state.executor
 
 
+def get_log_stream_manager(request: Request):
+    """Return the log stream manager."""
+
+    return request.app.state.log_stream_manager
+
+
 __all__ = [
     "get_executor",
     "get_graph_store",
+    "get_log_stream_manager",
     "get_run_store",
     "get_tool_registry",
 ]

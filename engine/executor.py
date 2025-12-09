@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from datetime import datetime
-from typing import Any, Dict, Iterable, Literal
+from typing import Any, Awaitable, Callable, Dict, Iterable, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -13,7 +13,7 @@ from engine.graph import Edge, Graph, LoopConfig
 from engine.node import Node
 from engine.state import WorkflowState
 
-ExecutionLogStatus = Literal["success", "failed"]
+ExecutionLogStatus = Literal["success", "failed", "cancelled"]
 
 
 class ExecutionError(Exception):
@@ -52,61 +52,57 @@ class ExecutionResult(BaseModel):
 
 
 class Executor:
-    """Synchronous workflow executor."""
+    """Workflow executor with async-aware node execution."""
 
     def __init__(self, *, sandbox_globals: Dict[str, Any] | None = None) -> None:
         self._sandbox_globals = sandbox_globals or {}
 
-    def run(self, graph: Graph, state: WorkflowState) -> ExecutionResult:
+    def run(
+        self,
+        graph: Graph,
+        state: WorkflowState,
+        *,
+        log_hook: Optional[Callable[[ExecutionLog], None]] = None,
+        cancel_checker: Optional[Callable[[], bool]] = None,
+    ) -> ExecutionResult:
         """Execute the graph sequentially and return the final state."""
 
-        logs: list[ExecutionLog] = []
-        loop_counters: Dict[tuple[str, str], int] = defaultdict(int)
-        current_node_id = graph.start_node
-        state.status = "running"
+        return asyncio.run(
+            self._run_async(
+                graph,
+                state,
+                log_hook=log_hook,
+                cancel_checker=cancel_checker,
+            )
+        )
 
-        while current_node_id:
-            node = graph.get_node(current_node_id)
-            try:
-                state, log_entry = self.run_once(node, state)
-                logs.append(log_entry)
-            except NodeExecutionError as exc:
-                logs.append(exc.log)
-                state.status = "failed"
-                raise exc
+    async def run_background(
+        self,
+        graph: Graph,
+        state: WorkflowState,
+        *,
+        log_hook: Optional[Callable[[ExecutionLog], None]] = None,
+        cancel_checker: Optional[Callable[[], bool]] = None,
+    ) -> ExecutionResult:
+        """Execute the graph without blocking the event loop."""
 
-            try:
-                next_node = self._select_next_node(
-                    graph.get_edges(current_node_id),
-                    state,
-                    loop_counters,
-                )
-            except ExecutionError as exc:
-                failure_log = ExecutionLog(
-                    node_id=current_node_id,
-                    status="failed",
-                    message="Loop evaluation failed",
-                    error=str(exc),
-                )
-                logs.append(failure_log)
-                state.status = "failed"
-                raise
-
-            current_node_id = next_node
-
-        state.status = "completed"
-        return ExecutionResult(run_id=str(state.run_id), final_state=state, logs=logs)
-
-    async def run_background(self, graph: Graph, state: WorkflowState) -> ExecutionResult:
-        """Execute the graph in a background thread for async contexts."""
-
-        return await asyncio.to_thread(self.run, graph, state)
+        return await self._run_async(
+            graph,
+            state,
+            log_hook=log_hook,
+            cancel_checker=cancel_checker,
+        )
 
     def run_once(self, node: Node, state: WorkflowState) -> tuple[WorkflowState, ExecutionLog]:
         """Execute a single node and return updated state and log."""
 
+        return asyncio.run(self.run_once_async(node, state))
+
+    async def run_once_async(self, node: Node, state: WorkflowState) -> tuple[WorkflowState, ExecutionLog]:
+        """Execute a single node asynchronously and return updated state and log."""
+
         try:
-            new_state = node.execute(state)
+            new_state = await self._invoke_node(node, state)
         except Exception as exc:  # pragma: no cover - defensive guard
             state.record(
                 node_id=node.id,
@@ -196,6 +192,82 @@ class Executor:
             **self._sandbox_globals,
         }
         return eval(expression, allowed_globals, allowed_locals)
+
+    async def _run_async(
+        self,
+        graph: Graph,
+        state: WorkflowState,
+        *,
+        log_hook: Optional[Callable[[ExecutionLog], None]] = None,
+        cancel_checker: Optional[Callable[[], bool]] = None,
+    ) -> ExecutionResult:
+        """Async implementation backing run/run_background."""
+
+        logs: list[ExecutionLog] = []
+        loop_counters: Dict[tuple[str, str], int] = defaultdict(int)
+        current_node_id = graph.start_node
+        state.status = "running"
+
+        while current_node_id:
+            if cancel_checker and cancel_checker():
+                cancel_log = ExecutionLog(
+                    node_id=current_node_id or "executor",
+                    status="cancelled",
+                    message="Run cancelled by user",
+                )
+                logs.append(cancel_log)
+                if log_hook:
+                    log_hook(cancel_log)
+                state.status = "cancelled"
+                break
+
+            node = graph.get_node(current_node_id)
+            try:
+                state, log_entry = await self.run_once_async(node, state)
+                logs.append(log_entry)
+                if log_hook:
+                    log_hook(log_entry)
+            except NodeExecutionError as exc:
+                logs.append(exc.log)
+                if log_hook:
+                    log_hook(exc.log)
+                state.status = "failed"
+                raise exc
+
+            try:
+                next_node = self._select_next_node(
+                    graph.get_edges(current_node_id),
+                    state,
+                    loop_counters,
+                )
+            except ExecutionError as exc:
+                failure_log = ExecutionLog(
+                    node_id=current_node_id,
+                    status="failed",
+                    message="Loop evaluation failed",
+                    error=str(exc),
+                )
+                logs.append(failure_log)
+                if log_hook:
+                    log_hook(failure_log)
+                state.status = "failed"
+                raise
+
+            current_node_id = next_node
+
+        if state.status != "cancelled":
+            state.status = "completed"
+        return ExecutionResult(run_id=str(state.run_id), final_state=state, logs=logs)
+
+    async def _invoke_node(self, node: Node, state: WorkflowState) -> WorkflowState:
+        """Invoke a node function, awaiting or offloading as needed."""
+
+        func = node.func
+        if asyncio.iscoroutinefunction(func):
+            result = await func(state)
+        else:
+            result = await asyncio.to_thread(func, state)
+        return result
 
 
 __all__ = [

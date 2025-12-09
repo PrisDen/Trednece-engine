@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """FastAPI application factory and runtime stores."""
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict
@@ -11,6 +12,8 @@ from fastapi import FastAPI
 from engine.executor import ExecutionLog, ExecutionResult, Executor
 from engine.registry import ToolRegistry
 from engine.state import ExecutionStatus, WorkflowState
+from app.routes import graph_routes, run_routes, ws_routes
+from app.ws import LogStreamManager
 
 logger = logging.getLogger("workflow.app")
 
@@ -59,6 +62,7 @@ class RunRecord:
     status: ExecutionStatus = "pending"
     logs: list[ExecutionLog] = field(default_factory=list)
     result: ExecutionResult | None = None
+    cancelled: bool = False
 
 
 class RunStore:
@@ -93,6 +97,14 @@ class RunStore:
         except KeyError as exc:
             raise KeyError(f"Run '{run_id}' not found.") from exc
 
+    def request_cancel(self, run_id: str) -> RunRecord:
+        """Mark a run for cancellation."""
+
+        record = self.get(run_id)
+        record.cancelled = True
+        record.status = "cancelled"
+        return record
+
 
 def _register_builtin_tools(registry: ToolRegistry) -> None:
     """Register a minimal set of default tools."""
@@ -123,6 +135,7 @@ def create_app() -> FastAPI:
     graph_store = GraphStore()
     run_store = RunStore()
     executor = Executor()
+    log_stream_manager = LogStreamManager()
 
     app = FastAPI(title="Workflow Engine", version="0.1.0")
 
@@ -130,9 +143,11 @@ def create_app() -> FastAPI:
     app.state.run_store = run_store
     app.state.tool_registry = registry
     app.state.executor = executor
+    app.state.log_stream_manager = log_stream_manager
 
     @app.on_event("startup")
     async def _startup() -> None:
+        log_stream_manager.bind_loop(asyncio.get_running_loop())
         logger.info("Workflow service starting up.")
 
     @app.on_event("shutdown")
@@ -144,6 +159,10 @@ def create_app() -> FastAPI:
         """Simple health probe."""
 
         return {"status": "ok"}
+
+    app.include_router(graph_routes.router)
+    app.include_router(run_routes.router)
+    app.include_router(ws_routes.router)
 
     return app
 
