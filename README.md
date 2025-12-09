@@ -5,10 +5,10 @@ Minimal FastAPI-powered workflow/graph engine that executes typed state machines
 ## What It Implements
 - Pydantic-based shared state passed through Python or async callables.
 - Graph loader with sequential, branch, and loop edges plus validation.
-- Execution engine with logging, loop safeguards, sync/background runs, and cancellation.
+- Execution engine with logging, loop safeguards, per-node timeout, sync/background runs, and cancellation.
 - FastAPI surfaces `/graph/create`, `/graph/run`, `/graph/state/{run_id}`, `/graph/cancel/{run_id}`.
-- WebSocket streaming for live logs at `/ws/logs/{run_id}`.
-- In-memory graph/run stores suitable for demos and interviews.
+- WebSocket streaming for live logs at `/ws/logs/{run_id}` (replays terminal statuses).
+- In-memory graph/run stores with per-run locks suitable for demos and interviews.
 
 ## Folder Structure
 - `engine/` – core workflow primitives (state, node, graph, executor).
@@ -90,10 +90,10 @@ websocat ws://localhost:8000/ws/logs/<run_id>
 Messages include `{"type":"log","log":{...}}` and terminal `{"type":"status","status":"completed"|"failed"|"cancelled"}`.
 
 ## Engine Capabilities & Current Limits
-- Supports sequential execution, safe expression-based branching, bounded loops, execution logs, background runs, and cancellations.
-- WebSocket streaming for live logs during execution.
+- Supports sequential execution, safe expression-based branching (AST evaluator), bounded loops, per-node timeout, execution logs, background runs, and cancellations.
+- WebSocket streaming for live logs during execution with terminal status replay.
 - Stores graphs/runs in-memory only (no persistence layer yet).
-- Loop/branch conditions rely on sandboxed Python expressions; DSL alternative is future work.
+- Loop/branch conditions rely on sandboxed expressions; DSL alternative is future work.
 - Tool registry ships with placeholders; real workflows should register domain-specific callables on startup.
 
 ## Branching & Looping At A Glance
@@ -107,6 +107,11 @@ Messages include `{"type":"log","log":{...}}` and terminal `{"type":"status","st
 - Enhance WebSocket client UX and add server-sent events fallback.
 - Build more contract tests for branch/loop semantics.
 - Introduce role-based access control and API tokens.
+
+## Security Notes
+- Branch/loop expressions are parsed via a restricted AST evaluator (no builtins, no attribute access), but still treat inputs as untrusted; prefer a DSL for multi-tenant scenarios.
+- No authentication or rate limiting is enabled; add before exposing publicly.
+- In-memory stores and WebSocket streams are unauthenticated; consider auth tokens and transport security.
 
 ## Interview Defense Notes
 - Emphasize Pydantic state for schema guarantees and FastAPI interop.

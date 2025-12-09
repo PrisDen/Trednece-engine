@@ -2,9 +2,10 @@ from __future__ import annotations
 
 """Unit tests for core engine components."""
 
+import asyncio
 import pytest
 
-from engine.executor import Executor, LoopLimitExceeded
+from engine.executor import Executor, LoopLimitExceeded, NodeTimeoutError
 from engine.graph import Graph
 from engine.registry import ToolRegistry
 from engine.state import WorkflowState
@@ -122,4 +123,30 @@ def test_loop_guard_prevents_infinite_cycles(registry: ToolRegistry) -> None:
 
     with pytest.raises(LoopLimitExceeded):
         executor.run(graph, WorkflowState())
+
+
+def test_safe_eval_blocks_attributes(registry: ToolRegistry) -> None:
+    graph = Graph.from_dict(build_graph_payload(), registry=registry)
+    executor = Executor()
+    with pytest.raises(ValueError):
+        executor._safe_eval("__import__('os').system('echo dangerous')", WorkflowState())
+
+
+def test_node_timeout_triggers_failure(registry: ToolRegistry) -> None:
+    async def slow(state: WorkflowState) -> WorkflowState:
+        await asyncio.sleep(0.05)
+        return state
+
+    registry.register("tools.slow", slow)
+    payload = {
+        "id": "timeout",
+        "name": "Timeout Graph",
+        "start_node": "slow",
+        "nodes": [{"id": "slow", "callable": "tools.slow"}],
+        "edges": [],
+    }
+    graph = Graph.from_dict(payload, registry=registry)
+    executor = Executor(node_timeout=0.01)
+    with pytest.raises(NodeTimeoutError):
+        asyncio.run(executor.run_async(graph, WorkflowState()))
 

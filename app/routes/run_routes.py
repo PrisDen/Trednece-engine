@@ -44,7 +44,7 @@ async def _execute_run(
     try:
         graph_payload = graph_store.get(graph_id)
         graph = Graph.from_dict(graph_payload, registry=registry)
-        record = run_store.get(run_id)
+        record = await run_store.get(run_id)
 
         def emit(log):
             record.logs.append(log)
@@ -61,12 +61,12 @@ async def _execute_run(
             cancel_checker=is_cancelled,
         )
         final_status = result.final_state.status
-        run_store.update(run_id, status=final_status, logs=result.logs, result=result)
+        await run_store.update(run_id, status=final_status, logs=result.logs, result=result)
         manager.publish(run_id, {"type": "status", "status": final_status})
         logger.info("Run %s %s", run_id, final_status)
     except Exception as exc:  # pragma: no cover - logging only
         logger.exception("Run %s failed: %s", run_id, exc)
-        run_store.update(run_id, status="failed")
+        await run_store.update(run_id, status="failed")
         manager.publish(run_id, {"type": "status", "status": "failed", "error": str(exc)})
 
 
@@ -94,7 +94,7 @@ async def launch_run(
     from app.main import RunRecord  # circular avoidance kept local
 
     record = RunRecord(run_id=run_id, graph_id=payload.graph_id, state=initial_state)
-    run_store.create(record)
+    await run_store.create(record)
 
     task_args = (
         run_id,
@@ -126,7 +126,7 @@ async def get_run_state(
     """Return run state and logs."""
 
     try:
-        record = run_store.get(run_id)
+        record = await run_store.get(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -146,7 +146,7 @@ async def cancel_run(
     """Request cancellation of an active run."""
 
     try:
-        record = run_store.get(run_id)
+        record = await run_store.get(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -156,7 +156,7 @@ async def cancel_run(
             detail=f"Run '{run_id}' is already finished.",
         )
 
-    run_store.request_cancel(run_id)
+    await run_store.request_cancel(run_id)
     manager.publish(run_id, {"type": "status", "status": "cancelled", "message": "Cancellation requested"})
     logger.info("Cancellation requested for run %s", run_id)
     return RunResponse(run_id=run_id, graph_id=record.graph_id, status="cancelled")

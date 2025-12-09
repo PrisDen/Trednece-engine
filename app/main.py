@@ -70,40 +70,61 @@ class RunStore:
 
     def __init__(self) -> None:
         self._runs: Dict[str, RunRecord] = {}
+        self._locks: Dict[str, asyncio.Lock] = {}
 
-    def create(self, record: RunRecord) -> None:
+    def _lock_for(self, run_id: str) -> asyncio.Lock:
+        lock = self._locks.get(run_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[run_id] = lock
+        return lock
+
+    async def create(self, record: RunRecord) -> None:
         """Persist a new run record."""
 
-        self._runs[record.run_id] = record
+        async with self._lock_for(record.run_id):
+            self._runs[record.run_id] = record
 
-    def update(self, run_id: str, *, status: ExecutionStatus | None = None, logs: list[ExecutionLog] | None = None, result: ExecutionResult | None = None) -> None:  # noqa: E501
+    async def update(
+        self,
+        run_id: str,
+        *,
+        status: ExecutionStatus | None = None,
+        logs: list[ExecutionLog] | None = None,
+        result: ExecutionResult | None = None,
+    ) -> None:
         """Update existing run metadata."""
 
-        record = self._runs.get(run_id)
-        if not record:
-            raise KeyError(f"Run '{run_id}' not found.")
-        if status:
-            record.status = status
-        if logs:
-            record.logs = logs
-        if result:
-            record.result = result
+        async with self._lock_for(run_id):
+            record = self._runs.get(run_id)
+            if not record:
+                raise KeyError(f"Run '{run_id}' not found.")
+            if status:
+                record.status = status
+            if logs:
+                record.logs = logs
+            if result:
+                record.result = result
 
-    def get(self, run_id: str) -> RunRecord:
+    async def get(self, run_id: str) -> RunRecord:
         """Fetch a run by identifier."""
 
-        try:
-            return self._runs[run_id]
-        except KeyError as exc:
-            raise KeyError(f"Run '{run_id}' not found.") from exc
+        async with self._lock_for(run_id):
+            try:
+                return self._runs[run_id]
+            except KeyError as exc:
+                raise KeyError(f"Run '{run_id}' not found.") from exc
 
-    def request_cancel(self, run_id: str) -> RunRecord:
+    async def request_cancel(self, run_id: str) -> RunRecord:
         """Mark a run for cancellation."""
 
-        record = self.get(run_id)
-        record.cancelled = True
-        record.status = "cancelled"
-        return record
+        async with self._lock_for(run_id):
+            record = self._runs.get(run_id)
+            if not record:
+                raise KeyError(f"Run '{run_id}' not found.")
+            record.cancelled = True
+            record.status = "cancelled"
+            return record
 
 
 def _register_builtin_tools(registry: ToolRegistry) -> None:
