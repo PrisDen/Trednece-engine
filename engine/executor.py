@@ -295,6 +295,14 @@ class Executor:
                 container = eval_node(node.value)
                 key = eval_node(node.slice)
                 return container[key]
+            if isinstance(node, ast.Call):
+                # allow context.get(key, default) only
+                if isinstance(node.func, ast.Attribute):
+                    if isinstance(node.func.value, ast.Name) and node.func.value.id == "context" and node.func.attr == "get":
+                        args = [eval_node(arg) for arg in node.args]
+                        kwargs = {kw.arg: eval_node(kw.value) for kw in node.keywords}
+                        return state.context.get(*args, **kwargs)
+                raise ValueError("Function calls are not allowed")
             if isinstance(node, ast.Attribute):
                 raise ValueError("Attribute access not allowed")
             if isinstance(node, ast.BinOp):
