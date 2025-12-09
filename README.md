@@ -1,24 +1,26 @@
 # Workflow Engine
 
-Minimal FastAPI-powered workflow/graph engine that executes typed state machines for branching review flows.
+Minimal FastAPI-powered workflow/graph engine that executes typed state machines for branching review flows. Now includes log streaming and run cancellation support.
 
 ## What It Implements
-- Pydantic-based shared state passed through Python callable nodes.
+- Pydantic-based shared state passed through Python or async callables.
 - Graph loader with sequential, branch, and loop edges plus validation.
-- Execution engine with logging, loop safeguards, sync/background runs.
-- FastAPI surfaces `/graph/create`, `/graph/run`, `/graph/state/{run_id}`.
+- Execution engine with logging, loop safeguards, sync/background runs, and cancellation.
+- FastAPI surfaces `/graph/create`, `/graph/run`, `/graph/state/{run_id}`, `/graph/cancel/{run_id}`.
+- WebSocket streaming for live logs at `/ws/logs/{run_id}`.
 - In-memory graph/run stores suitable for demos and interviews.
 
 ## Folder Structure
 - `engine/` – core workflow primitives (state, node, graph, executor).
-- `app/` – FastAPI app, schemas, routes, dependency helpers.
-- `tests/` – slot for unit/integration tests (not populated yet).
+- `app/` – FastAPI app, schemas, routes, dependency helpers, WebSocket routes.
+- `tests/` – unit and integration tests (pytest).
+- `.github/workflows/ci.yml` – GitHub Actions CI (pytest on 3.11).
 
 ## Quickstart
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 uvicorn app.main:app --reload
 ```
 
@@ -76,13 +78,23 @@ curl -X POST http://localhost:8000/graph/run \
 
 # retrieve run state/logs
 curl http://localhost:8000/graph/state/<run_id>
+
+# cancel a running execution
+curl -X POST http://localhost:8000/graph/cancel/<run_id>
 ```
 
+### WebSocket Log Stream
+```bash
+websocat ws://localhost:8000/ws/logs/<run_id>
+```
+Messages include `{"type":"log","log":{...}}` and terminal `{"type":"status","status":"completed"|"failed"|"cancelled"}`.
+
 ## Engine Capabilities & Current Limits
-- Supports sequential execution, safe expression-based branching, bounded loops, execution logs, and background runs.
+- Supports sequential execution, safe expression-based branching, bounded loops, execution logs, background runs, and cancellations.
+- WebSocket streaming for live logs during execution.
 - Stores graphs/runs in-memory only (no persistence layer yet).
-- Loop conditions rely on Python expressions evaluated in a sandbox; DSL alternative is future work.
-- Tool registry ships with two placeholders; real workflows should register domain-specific callables on startup.
+- Loop/branch conditions rely on sandboxed Python expressions; DSL alternative is future work.
+- Tool registry ships with placeholders; real workflows should register domain-specific callables on startup.
 
 ## Branching & Looping At A Glance
 - **Branch edges** carry a `condition` block with either a callable name or sandboxed Python expression; first truthy edge is taken.
@@ -92,8 +104,8 @@ curl http://localhost:8000/graph/state/<run_id>
 ## Future Improvements
 - Add persistence and pagination for graphs/runs via SQLite or Redis.
 - Expand tool registry loading (entry point discovery, dependency injection).
-- Implement WebSocket streaming for run logs (`?stream=true` placeholder).
-- Build unit/integration tests plus contract tests for branch/loop semantics.
+- Enhance WebSocket client UX and add server-sent events fallback.
+- Build more contract tests for branch/loop semantics.
 - Introduce role-based access control and API tokens.
 
 ## Interview Defense Notes
