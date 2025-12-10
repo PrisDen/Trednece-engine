@@ -14,6 +14,13 @@ from engine.registry import ToolRegistry
 from engine.state import ExecutionStatus, WorkflowState
 from app.routes import graph_routes, run_routes, ws_routes
 from app.ws import LogStreamManager
+from tools.code_review_mini import (
+    extract_functions,
+    check_complexity,
+    detect_basic_issues,
+    suggest_improvements,
+    evaluate_quality,
+)
 
 logger = logging.getLogger("workflow.app")
 
@@ -142,6 +149,18 @@ def _register_builtin_tools(registry: ToolRegistry) -> None:
         "tools.noop": noop,
         "tools.approve": approve,
     }.items():
+        if not registry.has(name):
+            registry.register(name, func)
+
+    # Register code review workflow tools
+    code_review_tools = {
+        "extract_functions": extract_functions,
+        "check_complexity": check_complexity,
+        "detect_basic_issues": detect_basic_issues,
+        "suggest_improvements": suggest_improvements,
+        "evaluate_quality": evaluate_quality,
+    }
+    for name, func in code_review_tools.items():
         if not registry.has(name):
             registry.register(name, func)
 

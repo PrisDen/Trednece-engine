@@ -1,0 +1,79 @@
+{
+  "id": "code_review_mini",
+  "name": "Code Review Mini-Agent",
+  "start_node": "extract_functions",
+  "nodes": [
+    {
+      "id": "extract_functions",
+      "callable": "extract_functions",
+      "name": "Extract Functions",
+      "metadata": {
+        "description": "Parse source code to extract function definitions"
+      }
+    },
+    {
+      "id": "check_complexity",
+      "callable": "check_complexity",
+      "name": "Check Complexity",
+      "metadata": {
+        "description": "Calculate cyclomatic complexity for each function"
+      }
+    },
+    {
+      "id": "detect_basic_issues",
+      "callable": "detect_basic_issues",
+      "name": "Detect Issues",
+      "metadata": {
+        "description": "Identify common code quality issues"
+      }
+    },
+    {
+      "id": "suggest_improvements",
+      "callable": "suggest_improvements",
+      "name": "Suggest Improvements",
+      "metadata": {
+        "description": "Generate actionable improvement suggestions"
+      }
+    },
+    {
+      "id": "evaluate_quality",
+      "callable": "evaluate_quality",
+      "name": "Evaluate Quality",
+      "metadata": {
+        "description": "Calculate overall quality score and determine if threshold is met"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "extract_functions",
+      "to": "check_complexity",
+      "type": "sequential"
+    },
+    {
+      "from": "check_complexity",
+      "to": "detect_basic_issues",
+      "type": "sequential"
+    },
+    {
+      "from": "detect_basic_issues",
+      "to": "suggest_improvements",
+      "type": "sequential"
+    },
+    {
+      "from": "suggest_improvements",
+      "to": "evaluate_quality",
+      "type": "sequential"
+    },
+    {
+      "from": "evaluate_quality",
+      "to": "suggest_improvements",
+      "type": "branch",
+      "condition": {
+        "expression": "context.get('quality_score', 0) < context.get('threshold', 70)",
+        "language": "python"
+      }
+    }
+  ]
+}
+

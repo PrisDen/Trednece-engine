@@ -13,6 +13,8 @@ Minimal FastAPI-powered workflow/graph engine that executes typed state machines
 ## Folder Structure
 - `engine/` – core workflow primitives (state, node, graph, executor).
 - `app/` – FastAPI app, schemas, routes, dependency helpers, WebSocket routes.
+- `tools/` – workflow tool implementations (code review mini-agent, etc.).
+- `sample_graphs/` – example workflow JSON definitions.
 - `tests/` – unit and integration tests (pytest).
 - `.github/workflows/ci.yml` – GitHub Actions CI (pytest on 3.11).
 
@@ -24,9 +26,50 @@ pip install -r requirements-dev.txt
 uvicorn app.main:app --reload
 ```
 
-## Sample Code-Review Workflow
+## Code Review Mini-Agent Workflow
 
-`code_review.json`
+A complete sample workflow demonstrating the engine's capabilities. Located in `sample_graphs/code_review.json` with tools in `tools/code_review_mini.py`.
+
+### Workflow Steps
+1. **extract_functions** – Parse source code to extract function definitions and metadata
+2. **check_complexity** – Calculate cyclomatic complexity for each function
+3. **detect_basic_issues** – Identify code quality issues (missing docstrings, too many params, high complexity, etc.)
+4. **suggest_improvements** – Generate actionable improvement suggestions
+5. **evaluate_quality** – Compute quality score (0-100); loops back to step 4 until score ≥ threshold
+
+### Usage
+```bash
+# Register the code review graph
+curl -X POST http://localhost:8000/graph/create \
+  -H "Content-Type: application/json" \
+  -d @sample_graphs/code_review.json
+
+# Run code review on a sample
+curl -X POST http://localhost:8000/graph/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "graph_id": "code_review_mini",
+    "initial_state": {
+      "code": "def foo(a, b, c, d, e, f):\n    if a > 0:\n        return b\n    return c",
+      "threshold": 70
+    },
+    "background": false
+  }'
+
+# Retrieve run state and quality report
+curl http://localhost:8000/graph/state/<run_id>
+```
+
+### Quality Score Calculation
+- Base score: 100
+- Deductions: errors (-10), warnings (-5), info (-2), high complexity penalty
+- Bonuses: applied improvements (+5 each), iteration bonus (+8 per loop)
+- Score clamped to 0-100, grades: A (90+), B (80+), C (70+), D (60+), F (<60)
+
+## Basic Workflow Example
+
+For simpler use cases with placeholder tools:
+
 ```json
 {
   "id": "code-review-a",
@@ -65,7 +108,7 @@ uvicorn app.main:app --reload
 }
 ```
 
-```
+```bash
 # register the graph
 curl -X POST http://localhost:8000/graph/create \
   -H "Content-Type: application/json" \
@@ -94,7 +137,7 @@ Messages include `{"type":"log","log":{...}}` and terminal `{"type":"status","st
 - WebSocket streaming for live logs during execution with terminal status replay.
 - Stores graphs/runs in-memory only (no persistence layer yet).
 - Loop/branch conditions rely on sandboxed expressions; DSL alternative is future work.
-- Tool registry ships with placeholders; real workflows should register domain-specific callables on startup.
+- Tool registry includes built-in code review tools; additional domain-specific callables can be registered on startup.
 
 ## Branching & Looping At A Glance
 - **Branch edges** carry a `condition` block with either a callable name or sandboxed Python expression; first truthy edge is taken.
